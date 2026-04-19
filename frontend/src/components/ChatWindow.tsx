@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import type { Message, ModelOption, ReasoningLevel } from '../types';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import type { Message } from '../types';
 import ChatInput from './ChatInput';
+import Icon from './Icons';
 
 interface ChatWindowProps {
   messages: Message[];
@@ -8,27 +11,62 @@ interface ChatWindowProps {
   isStreaming: boolean;
   streamingStartedAt: number | null;
   errorMessage: string;
-  modelOptions: ModelOption[];
-  selectedModel: string;
-  onModelChange: (model: string) => void;
-  reasoningLevel: ReasoningLevel;
-  onReasoningLevelChange: (level: ReasoningLevel) => void;
+  currentModelLabel: string;
   onSend: (message: string) => void;
+  onOpenModelPicker: () => void;
 }
 
-function parseApiDate(iso: string): Date {
-  const hasTimezone = /[zZ]|[+-]\d{2}:\d{2}$/.test(iso);
-  return new Date(hasTimezone ? iso : `${iso}Z`);
-}
+const featureStacks = [
+  {
+    title: 'Explore',
+    body: 'Learn how to use chat.ai platform for your needs',
+    icon: 'globe' as const,
+  },
+  {
+    title: 'Capabilities',
+    body: 'How much capable chat.ai to full-fill your needs',
+    icon: 'lightning' as const,
+  },
+  {
+    title: 'Limitation',
+    body: 'How much capable chat.ai to full-fill your needs',
+    icon: 'warning' as const,
+  },
+];
 
-function formatTime(iso: string): string {
-  const d = parseApiDate(iso);
-  return d.toLocaleString('zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+const featureCards = [
+  {
+    title: '"Explain"',
+    body: 'Quantum computing in simple terms',
+  },
+  {
+    title: '"How to"',
+    body: 'Make a search engine platform like google',
+  },
+  {
+    title: '"Remember"',
+    body: 'quantum computing in simple terms',
+  },
+  {
+    title: '"Allows"',
+    body: 'User to provide follow-up corrections',
+  },
+  {
+    title: '"May"',
+    body: 'Occasionally generate incorrect information',
+  },
+  {
+    title: '"Limited"',
+    body: 'Knowledge of world and events after 2021',
+  },
+];
+
+const WELCOME_TITLE = 'Good day! How may I assist you today?';
+
+function MarkdownMessage({ content }: { content: string }) {
+  return (
+    <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+  );
 }
 
 export default function ChatWindow({
@@ -37,15 +75,29 @@ export default function ChatWindow({
   isStreaming,
   streamingStartedAt,
   errorMessage,
-  modelOptions,
-  selectedModel,
-  onModelChange,
-  reasoningLevel,
-  onReasoningLevelChange,
+  currentModelLabel,
   onSend,
+  onOpenModelPicker,
 }: ChatWindowProps) {
   const messagesRef = useRef<HTMLDivElement>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [typedWelcomeTitle, setTypedWelcomeTitle] = useState('');
+
+  const handleCopy = async (content: string) => {
+    try {
+      await navigator.clipboard.writeText(content);
+    } catch {
+      const textarea = document.createElement('textarea');
+      textarea.value = content;
+      textarea.setAttribute('readonly', 'true');
+      textarea.style.position = 'absolute';
+      textarea.style.left = '-9999px';
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textarea);
+    }
+  };
 
   useEffect(() => {
     const container = messagesRef.current;
@@ -63,83 +115,207 @@ export default function ChatWindow({
       return;
     }
 
-    const updateElapsed = () => {
+    const timer = window.setInterval(() => {
       setElapsedSeconds(Math.max(0, Math.floor((Date.now() - streamingStartedAt) / 1000)));
-    };
+    }, 1000);
 
-    updateElapsed();
-    const timer = window.setInterval(updateElapsed, 1000);
     return () => window.clearInterval(timer);
   }, [isStreaming, streamingStartedAt]);
 
   const showEmpty = messages.length === 0 && !isStreaming;
 
+  useEffect(() => {
+    if (!showEmpty) {
+      setTypedWelcomeTitle(WELCOME_TITLE);
+      return;
+    }
+
+    setTypedWelcomeTitle('');
+
+    let index = 0;
+    const timer = window.setInterval(() => {
+      index += 1;
+      setTypedWelcomeTitle(WELCOME_TITLE.slice(0, index));
+
+      if (index >= WELCOME_TITLE.length) {
+        window.clearInterval(timer);
+      }
+    }, 48);
+
+    return () => window.clearInterval(timer);
+  }, [showEmpty]);
+
   return (
-    <div className="main-area">
-      {errorMessage && <div className="error-banner">{errorMessage}</div>}
+    <main className="chat-stage">
+      <button
+        type="button"
+        className="chat-model-trigger"
+        aria-label={`Current model ${currentModelLabel}`}
+        onClick={onOpenModelPicker}
+      >
+        <span>{currentModelLabel}</span>
+        <Icon name="arrow-down" />
+      </button>
+
+      {errorMessage && <div className="stage-error-banner">{errorMessage}</div>}
 
       {showEmpty ? (
-        <div className="empty-state">
-          <div className="empty-icon">AI</div>
-          <h2>{'\u4f60\u597d\uff0c\u5f00\u59cb\u804a\u70b9\u4ec0\u4e48\uff1f'}</h2>
-          <p>
-            {
-              '\u4f60\u53ef\u4ee5\u76f4\u63a5\u63d0\u95ee\u3001\u8ba9\u5b83\u6574\u7406\u5185\u5bb9\uff0c\u6216\u8005\u57fa\u4e8e\u5386\u53f2\u5bf9\u8bdd\u7ee7\u7eed\u8ffd\u95ee\u3002'
-            }
-          </p>
-        </div>
-      ) : (
-        <div className="chat-messages" id="chat-messages" ref={messagesRef}>
-          <div className="messages-container">
-            {messages.map((msg) => (
-              <div key={msg.id} className={`message ${msg.role}`}>
-                <div className="message-avatar">
-                  {msg.role === 'user' ? '\u4f60' : 'AI'}
-                </div>
-                <div>
-                  <div className="message-content">{msg.content}</div>
-                  <div className="message-time">{formatTime(msg.created_at)}</div>
-                </div>
-              </div>
-            ))}
+        <section className="welcome-stage">
+          <div className="welcome-scroll">
+            <h1>
+              <span
+                className={`welcome-typewriter ${
+                  typedWelcomeTitle === WELCOME_TITLE ? 'is-complete' : ''
+                }`}
+              >
+                {typedWelcomeTitle}
+              </span>
+            </h1>
 
-            {isStreaming && (
-              <div className="message assistant">
-                <div className="message-avatar">AI</div>
-                <div>
-                  <div className="message-content">
-                    {streamingContent || (
-                      <div className="streaming-status">
-                        <div className="typing-indicator">
-                          <span className="dot" />
-                          <span className="dot" />
-                          <span className="dot" />
-                        </div>
-                        <div className="streaming-hint">
-                          {'\u6b63\u5728\u751f\u6210\u4e2d...'}
-                          {elapsedSeconds > 0
-                            ? ` \u5df2\u7b49\u5f85 ${elapsedSeconds}s`
-                            : ''}
+            <div className="welcome-grid">
+              <div className="welcome-stack">
+                {featureStacks.map((stack) => (
+                  <div key={stack.title} className="welcome-stack-row">
+                    <div className="welcome-stack-card">
+                      <span className="welcome-stack-icon">
+                        <Icon name={stack.icon} />
+                      </span>
+                      <strong>{stack.title}</strong>
+                      <p>{stack.body}</p>
+                    </div>
+                    <div className="welcome-stack-divider">
+                      <span />
+                      <span />
+                      <span />
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="welcome-card-grid">
+                {featureCards.map((card) => (
+                  <div key={card.title} className="welcome-card">
+                    <div className="welcome-card-copy">
+                      <strong>{card.title}</strong>
+                      <p>{card.body}</p>
+                    </div>
+                    <span className="welcome-card-arrow">
+                      <Icon name="arrow-right" />
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+          <div className="chat-composer-dock">
+            <ChatInput onSend={onSend} disabled={false} />
+          </div>
+        </section>
+      ) : (
+        <div className="thread-shell">
+          <div className="thread-scroll" ref={messagesRef}>
+            <div className="thread-inner">
+              {messages.map((message) => (
+                <article
+                  key={message.id}
+                  className={`thread-entry ${message.role === 'assistant' ? 'is-assistant' : 'is-user'}`}
+                >
+                  {message.role === 'user' && (
+                    <div className="thread-head is-user">
+                      <div className="thread-userline is-user">
+                        <span className="thread-prompt thread-prompt--user">{message.content}</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {message.role === 'assistant' && (
+                    <div className="thread-answer-card">
+                      <div className="thread-label-row">
+                        <span className="thread-brand-label">CHAT A.I+</span>
+                        <span className="thread-brand-badge" />
+                      </div>
+                      <div className="thread-answer-body">
+                        <MarkdownMessage content={message.content} />
+                      </div>
+                      <div className="thread-answer-footer">
+                        <div className="thread-actions">
+                          <button
+                            type="button"
+                            className="thread-action-pill"
+                            aria-label="Copy answer"
+                            onClick={() => void handleCopy(message.content)}
+                          >
+                            <Icon name="copy" />
+                          </button>
+                          <button
+                            type="button"
+                            className="thread-action-pill"
+                            aria-label="Refresh answer"
+                          >
+                            <Icon name="refresh" />
+                          </button>
+                          <button
+                            type="button"
+                            className="thread-action-pill"
+                            aria-label="Read answer aloud"
+                          >
+                            <Icon name="volume-loud" />
+                          </button>
+                          <button type="button" className="thread-action-pill" aria-label="Like answer">
+                            <Icon name="thumb" />
+                          </button>
+                          <button
+                            type="button"
+                            className="thread-action-pill"
+                            aria-label="Dislike answer"
+                          >
+                            <Icon name="thumb-down" />
+                          </button>
+                          <button type="button" className="thread-action-pill" aria-label="Share answer">
+                            <Icon name="share" />
+                          </button>
+                          <button type="button" className="thread-action-pill" aria-label="More actions">
+                            <Icon name="more-1" />
+                          </button>
                         </div>
                       </div>
-                    )}
+                    </div>
+                  )}
+                </article>
+              ))}
+
+              {isStreaming && (
+                <article className="thread-entry is-assistant">
+                  <div className="thread-head">
+                    <div className="thread-userline">
+                      <span className="thread-avatar assistant">AI</span>
+                      <span className="thread-prompt">Generating a response...</span>
+                    </div>
                   </div>
-                </div>
-              </div>
-            )}
+                  <div className="thread-answer-card">
+                    <div className="thread-label-row">
+                      <span className="thread-brand-label">CHAT A.I+</span>
+                      <span className="thread-brand-badge" />
+                    </div>
+                    <div className="thread-answer-body">
+                      {!streamingContent && (
+                        <span className="thread-streaming-hint">
+                          Thinking...
+                          {elapsedSeconds > 0 ? ` ${elapsedSeconds}s` : ''}
+                        </span>
+                      )}
+                      {streamingContent && <MarkdownMessage content={streamingContent} />}
+                    </div>
+                  </div>
+                </article>
+              )}
+            </div>
+          </div>
+          <div className="chat-composer-dock">
+            <ChatInput onSend={onSend} disabled={isStreaming} />
           </div>
         </div>
       )}
-
-      <ChatInput
-        onSend={onSend}
-        disabled={isStreaming}
-        modelOptions={modelOptions}
-        selectedModel={selectedModel}
-        onModelChange={onModelChange}
-        reasoningLevel={reasoningLevel}
-        onReasoningLevelChange={onReasoningLevelChange}
-      />
-    </div>
+    </main>
   );
 }
