@@ -35,6 +35,7 @@ const VIEW_STORAGE_KEY = 'memory-chat:active-view';
 const AUTH_TOKEN_STORAGE_KEY = 'memory-chat:auth-token';
 const SETTINGS_SECTION_STORAGE_KEY = 'memory-chat:settings-section';
 const THEME_STORAGE_KEY = 'memory-chat:theme';
+const ACTIVE_CONVERSATION_KEY = 'memory-chat:active-conversation';
 const INLINE_CANDIDATE_POLL_DELAYS = [1000, 3000, 6000, 10000] as const;
 
 type AppView = 'signup' | 'chat';
@@ -129,8 +130,11 @@ export default function App() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [draftProjectId, setDraftProjectId] = useState<string | null>(null);
-  const [activeConvId, setActiveConvId] = useState<string | null>(null);
+  const [activeConvId, setActiveConvId] = useState<string | null>(() => {
+    return window.localStorage.getItem(ACTIVE_CONVERSATION_KEY) || null;
+  });
   const [messages, setMessages] = useState<Message[]>([]);
+  const [isMessagesLoading, setIsMessagesLoading] = useState(false);
   const [modelOptions, setModelOptions] = useState<ModelOption[]>([]);
   const [selectedModel, setSelectedModel] = useState('');
   const [reasoningLevel, setReasoningLevel] = useState<ReasoningLevel>('off');
@@ -308,6 +312,13 @@ export default function App() {
         setConversations(conversationData);
         setProjects(projectData);
         setErrorMessage('');
+
+        // Validate stored active conversation ID
+        const storedConvId = activeConvIdRef.current;
+        if (storedConvId && !conversationData.some((c) => c.id === storedConvId)) {
+          window.localStorage.removeItem(ACTIVE_CONVERSATION_KEY);
+          setActiveConvId(null);
+        }
       })
       .catch((err: Error) => {
         console.error(err);
@@ -362,6 +373,14 @@ export default function App() {
       isSidebarCollapsed ? 'true' : 'false'
     );
   }, [isSidebarCollapsed]);
+
+  useEffect(() => {
+    if (activeConvId) {
+      window.localStorage.setItem(ACTIVE_CONVERSATION_KEY, activeConvId);
+    } else {
+      window.localStorage.removeItem(ACTIVE_CONVERSATION_KEY);
+    }
+  }, [activeConvId]);
 
   useEffect(() => {
     if (!selectedModel || modelOptions.length === 0) return;
@@ -449,19 +468,50 @@ export default function App() {
       clearInlineCandidatePolls();
       setMessages([]);
       setInlineCandidate(null);
+      setIsMessagesLoading(false);
       return;
     }
 
+    setIsMessagesLoading(true);
     api
       .fetchMessages(activeConvId)
-      .then((data) => {
+      .then(async (data) => {
         setMessages(data);
         setErrorMessage('');
         void loadInlineCandidate(activeConvId, activeProjectId ?? null);
+
+        // Load version info for assistant messages that have versions
+        const assistantMessages = data.filter(
+          (msg) => msg.role === 'assistant' && msg.parent_message_id
+        );
+        if (assistantMessages.length > 0) {
+          const versionResults = await Promise.all(
+            assistantMessages.map((msg) =>
+              api.getMessageVersions(activeConvId, msg.id).catch(() => null)
+            )
+          );
+          const newVersions: Record<string, { total: number; currentVersion: number }> = {};
+          versionResults.forEach((result, index) => {
+            if (result && result.total > 1) {
+              const msg = assistantMessages[index];
+              newVersions[msg.id] = {
+                total: result.total,
+                currentVersion: result.current_version,
+              };
+            }
+          });
+          setMessageVersions(newVersions);
+        }
       })
       .catch((err: Error) => {
         console.error(err);
         setErrorMessage(err.message);
+        // If conversation doesn't exist, clear it
+        window.localStorage.removeItem(ACTIVE_CONVERSATION_KEY);
+        setActiveConvId(null);
+      })
+      .finally(() => {
+        setIsMessagesLoading(false);
       });
   }, [activeConvId, activeProjectId, clearInlineCandidatePolls, currentUser, loadInlineCandidate]);
 
@@ -1553,6 +1603,7 @@ export default function App() {
         isModelPickerOpen={isModelPickerOpen}
         inlineCandidate={inlineCandidate}
         isMemoryMutating={isMemoryMutating}
+        isMessagesLoading={isMessagesLoading}
         onSend={handleSend}
         onStopStreaming={handleStopStreaming}
         onToggleModelPicker={handleToggleModelPicker}

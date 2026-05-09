@@ -40,6 +40,7 @@ interface ChatWindowProps {
   isModelPickerOpen: boolean;
   inlineCandidate: MemoryCandidate | null;
   isMemoryMutating: boolean;
+  isMessagesLoading: boolean;
   onSend: (payload: { message: string; attachments: ComposerAttachment[] }) => void;
   onStopStreaming: () => void;
   onToggleModelPicker: () => void;
@@ -1051,6 +1052,7 @@ export default function ChatWindow({
   isModelPickerOpen,
   inlineCandidate,
   isMemoryMutating,
+  isMessagesLoading,
   onSend,
   onStopStreaming,
   onToggleModelPicker,
@@ -1201,9 +1203,10 @@ export default function ChatWindow({
     return () => window.clearInterval(timer);
   }, [isStreaming, streamingStartedAt]);
 
-  const showEmpty = messages.length === 0 && !isStreaming;
-  const showProjectHome = showEmpty && Boolean(activeProjectName);
-  const showWelcomeHome = showEmpty && !showProjectHome;
+  const showEmpty = messages.length === 0 && !isStreaming && !isMessagesLoading;
+  const showLoading = conversationId && isMessagesLoading && messages.length === 0;
+  const showProjectHome = showEmpty && Boolean(activeProjectName) && !conversationId;
+  const showWelcomeHome = showEmpty && !showProjectHome && !conversationId;
 
   useEffect(() => {
     if (!showWelcomeHome) {
@@ -1268,7 +1271,16 @@ export default function ChatWindow({
         onClose={onCloseModelPicker}
       />
 
-      {showProjectHome && activeProjectName ? (
+      {showLoading ? (
+        <section className="welcome-stage">
+          <div className="welcome-scroll">
+            <div className="welcome-loading">
+              <span className="welcome-loading-spinner" />
+              <span className="welcome-loading-text">加载中...</span>
+            </div>
+          </div>
+        </section>
+      ) : showProjectHome && activeProjectName ? (
         <section className="project-home-stage">
           <div className="project-home-scroll">
             <div className="project-home-panel">

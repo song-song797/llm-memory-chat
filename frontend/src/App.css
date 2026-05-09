@@ -2607,6 +2607,35 @@
   }
 }
 
+.welcome-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 100px 20px;
+}
+
+.welcome-loading-spinner {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 3px solid rgba(128, 94, 125, 0.2);
+  border-top-color: #6b5b6a;
+  animation: welcome-loading-spin 0.8s linear infinite;
+}
+
+.welcome-loading-text {
+  font-size: 14px;
+  color: #6b5b6a;
+}
+
+@keyframes welcome-loading-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .welcome-grid {
   display: flex;
   gap: 20px;
