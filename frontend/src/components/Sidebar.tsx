@@ -1,7 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { Conversation } from '../types';
+import type { Conversation, Project, User } from '../types';
 import Icon from './Icons';
+import ProjectFormDialog from './ProjectFormDialog';
+import ProjectGroup, { ConversationList } from './ProjectGroup';
 
 interface SidebarProps {
   conversations: Conversation[];
@@ -9,31 +11,75 @@ interface SidebarProps {
   onSelect: (id: string) => void;
   onNew: () => void;
   onDelete: (id: string) => void;
+  onRename: (id: string, currentTitle: string) => void;
+  onTogglePin: (id: string, pinned: boolean) => void;
+  onClearAll: () => void;
   onOpenSettings: () => void;
+  onLogout: () => void;
+  currentUser: User;
   isMobileOpen: boolean;
   onCloseMobile: () => void;
   isCollapsed: boolean;
   onToggleCollapsed: () => void;
+  isClearingAll: boolean;
+  projects: Project[];
+  activeProjectId: string | null;
+  onNewProject: (name: string) => void;
+  onNewProjectChat: (projectId: string) => void;
+  onRenameProject: (projectId: string, name: string) => void;
+  onArchiveProject: (projectId: string) => void;
 }
 
-function formatConversationTitle(title: string): string {
-  return title.length > 28 ? `${title.slice(0, 28)}...` : title;
+function getUserLabel(email: string): string {
+  const localPart = email.split('@')[0]?.trim();
+  if (!localPart) {
+    return 'My Account';
+  }
+
+  return localPart
+    .split(/[._-]+/)
+    .filter(Boolean)
+    .map((segment) => segment[0].toUpperCase() + segment.slice(1))
+    .join(' ');
+}
+
+function getUserInitials(email: string): string {
+  const localPart = email.split('@')[0]?.trim();
+  if (!localPart) {
+    return 'ME';
+  }
+
+  const segments = localPart.split(/[._-]+/).filter(Boolean);
+  if (segments.length >= 2) {
+    return `${segments[0][0]}${segments[1][0]}`.toUpperCase();
+  }
+
+  return localPart.slice(0, 2).toUpperCase();
 }
 
 function ConversationMenu({
   conversationId,
+  title,
+  pinned,
   isOpen,
   onToggle,
+  onRename,
+  onTogglePin,
   onDelete,
 }: {
   conversationId: string;
+  title: string;
+  pinned: boolean;
   isOpen: boolean;
   onToggle: () => void;
+  onRename: (id: string, currentTitle: string) => void;
+  onTogglePin: (id: string, pinned: boolean) => void;
   onDelete: (id: string) => void;
 }) {
   const buttonRef = useRef<HTMLButtonElement>(null);
   const [menuPosition, setMenuPosition] = useState<{ top: number; left: number } | null>(null);
   const [isMounted, setIsMounted] = useState(false);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
 
   useEffect(() => {
     setIsMounted(true);
@@ -77,9 +123,17 @@ function ConversationMenu({
           event.stopPropagation();
           onToggle();
         }}
+        onMouseDown={(event) => {
+          event.stopPropagation();
+        }}
       >
         <Icon name="more-1" />
       </button>
+      {pinned ? (
+        <span className="shell-conversation-pin" aria-label="Pinned conversation">
+          <Icon name="pin" />
+        </span>
+      ) : null}
       {isOpen && menuPosition && isMounted
         ? createPortal(
             <div
@@ -89,22 +143,90 @@ function ConversationMenu({
                 left: `${menuPosition.left}px`,
               }}
             >
-              <button type="button" className="shell-conversation-menu-item">
+              <button
+                type="button"
+                className="shell-conversation-menu-item"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setIsDeleteDialogOpen(false);
+                  onTogglePin(conversationId, pinned);
+                }}
+              >
                 <Icon name="pin" />
-                <span>置顶</span>
+                <span>{pinned ? '取消置顶' : '置顶'}</span>
               </button>
-              <button type="button" className="shell-conversation-menu-item">
+              <button
+                type="button"
+                className="shell-conversation-menu-item"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setIsDeleteDialogOpen(false);
+                  onRename(conversationId, title);
+                }}
+              >
                 <Icon name="pen" />
                 <span>重命名</span>
               </button>
               <button
                 type="button"
                 className="shell-conversation-menu-item is-danger"
-                onClick={() => onDelete(conversationId)}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setIsDeleteDialogOpen(true);
+                  onToggle();
+                }}
               >
                 <Icon name="delete" />
                 <span>删除</span>
               </button>
+            </div>,
+            document.body
+          )
+        : null}
+      {isDeleteDialogOpen && isMounted
+        ? createPortal(
+            <div className="shell-confirm-layer" role="presentation">
+              <button
+                type="button"
+                className="shell-confirm-backdrop"
+                aria-label="Close delete confirmation"
+                onClick={() => setIsDeleteDialogOpen(false)}
+              />
+              <div
+                className="shell-confirm-dialog"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby={`delete-conversation-title-${conversationId}`}
+              >
+                <h3
+                  id={`delete-conversation-title-${conversationId}`}
+                  className="shell-confirm-title"
+                >
+                  确认删除会话？
+                </h3>
+                <p className="shell-confirm-text">
+                  删除后将无法恢复，确认删除“{title}”吗？
+                </p>
+                <div className="shell-confirm-actions">
+                  <button
+                    type="button"
+                    className="shell-confirm-button"
+                    onClick={() => setIsDeleteDialogOpen(false)}
+                  >
+                    取消
+                  </button>
+                  <button
+                    type="button"
+                    className="shell-confirm-button is-danger"
+                    onClick={() => {
+                      setIsDeleteDialogOpen(false);
+                      onDelete(conversationId);
+                    }}
+                  >
+                    删除
+                  </button>
+                </div>
+              </div>
             </div>,
             document.body
           )
@@ -119,19 +241,34 @@ export default function Sidebar({
   onSelect,
   onNew,
   onDelete,
+  onRename,
+  onTogglePin,
+  onClearAll,
   onOpenSettings,
+  onLogout,
+  currentUser,
   isMobileOpen,
   onCloseMobile,
   isCollapsed,
   onToggleCollapsed,
+  isClearingAll,
+  projects,
+  activeProjectId,
+  onNewProject,
+  onNewProjectChat,
+  onRenameProject,
+  onArchiveProject,
 }: SidebarProps) {
-  const primaryConversations = conversations.slice(0, 6);
-  const recentConversations = conversations.slice(6, 9);
-  const compactConversationId =
-    activeId ?? primaryConversations[0]?.id ?? recentConversations[0]?.id ?? null;
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const [openConversationMenuId, setOpenConversationMenuId] = useState<string | null>(null);
+  const [editingConversationId, setEditingConversationId] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState('');
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isClearConfirming, setIsClearConfirming] = useState(false);
+  const [isProjectDialogOpen, setIsProjectDialogOpen] = useState(false);
   const profileMenuRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const handlePointerDown = (event: MouseEvent) => {
@@ -153,10 +290,164 @@ export default function Sidebar({
     return () => document.removeEventListener('mousedown', handlePointerDown);
   }, []);
 
+  useEffect(() => {
+    if (!isSearchOpen) {
+      return;
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      searchInputRef.current?.focus();
+      searchInputRef.current?.select();
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [isSearchOpen]);
+
+  useEffect(() => {
+    if (conversations.length > 0) {
+      return;
+    }
+
+    setIsClearConfirming(false);
+  }, [conversations.length]);
+
+  const normalizedQuery = searchQuery.trim().toLowerCase();
+  const filteredConversations = useMemo(() => {
+    if (!normalizedQuery) {
+      return conversations;
+    }
+
+    return conversations.filter((conversation) =>
+      conversation.title.toLowerCase().includes(normalizedQuery)
+    );
+  }, [conversations, normalizedQuery]);
+
+  const ordinaryConversations = useMemo(
+    () => filteredConversations.filter((conversation) => !conversation.project_id),
+    [filteredConversations]
+  );
+  const conversationsByProject = useMemo(() => {
+    const groups = new Map<string, Conversation[]>();
+    for (const project of projects) {
+      groups.set(project.id, []);
+    }
+    for (const conversation of filteredConversations) {
+      if (!conversation.project_id) {
+        continue;
+      }
+      groups.get(conversation.project_id)?.push(conversation);
+    }
+    return groups;
+  }, [filteredConversations, projects]);
+  const visibleProjects = useMemo(() => {
+    if (!normalizedQuery) {
+      return projects;
+    }
+
+    return projects.filter((project) => (conversationsByProject.get(project.id)?.length ?? 0) > 0);
+  }, [conversationsByProject, normalizedQuery, projects]);
+  const compactConversationId =
+    activeId ?? filteredConversations[0]?.id ?? conversations[0]?.id ?? null;
+  const hasConversations = conversations.length > 0;
+  const hasSearchQuery = normalizedQuery.length > 0;
+  const showSearchResults = isSearchOpen && hasSearchQuery;
+  const showOrdinaryGroup = !showSearchResults || ordinaryConversations.length > 0;
+  const searchResultCount = filteredConversations.length;
+  const currentUserLabel = getUserLabel(currentUser.email);
+  const currentUserInitials = getUserInitials(currentUser.email);
+
   const handleConversationDelete = (id: string) => {
     setOpenConversationMenuId(null);
     onDelete(id);
   };
+
+  const handleConversationRename = (id: string, currentTitle: string) => {
+    setOpenConversationMenuId(null);
+    setEditingConversationId(id);
+    setEditingTitle(currentTitle);
+  };
+
+  const handleConversationPinToggle = (id: string, pinned: boolean) => {
+    setOpenConversationMenuId(null);
+    onTogglePin(id, pinned);
+  };
+
+  const handleRenameSubmit = () => {
+    if (!editingConversationId) {
+      return;
+    }
+
+    const targetConversation = conversations.find(
+      (conversation) => conversation.id === editingConversationId
+    );
+    const nextTitle = editingTitle.trim();
+
+    setEditingConversationId(null);
+
+    if (!targetConversation || !nextTitle || nextTitle === targetConversation.title) {
+      setEditingTitle('');
+      return;
+    }
+
+    setEditingTitle('');
+    onRename(editingConversationId, nextTitle);
+  };
+
+  const handleRenameCancel = () => {
+    setEditingConversationId(null);
+    setEditingTitle('');
+  };
+
+  const handleToggleSearch = () => {
+    if (isCollapsed) {
+      onToggleCollapsed();
+      setIsSearchOpen(true);
+      return;
+    }
+
+    setIsSearchOpen((current) => {
+      const next = !current;
+      if (!next) {
+        setSearchQuery('');
+      }
+      return next;
+    });
+  };
+
+  const handleSearchKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Escape') {
+      setSearchQuery('');
+      setIsSearchOpen(false);
+    }
+  };
+
+  const handleClearAll = () => {
+    if (isClearingAll) {
+      return;
+    }
+
+    if (!isClearConfirming) {
+      setIsClearConfirming(true);
+      return;
+    }
+
+    onClearAll();
+  };
+
+  const renderConversationActions = (conversation: Conversation) => (
+    <ConversationMenu
+      conversationId={conversation.id}
+      title={conversation.title}
+      pinned={conversation.pinned}
+      isOpen={openConversationMenuId === conversation.id}
+      onToggle={() =>
+        setOpenConversationMenuId((prev) => (prev === conversation.id ? null : conversation.id))
+      }
+      onRename={handleConversationRename}
+      onTogglePin={handleConversationPinToggle}
+      onDelete={handleConversationDelete}
+    />
+  );
 
   return (
     <aside
@@ -189,108 +480,168 @@ export default function Sidebar({
               </div>
             </div>
 
-            <div className="shell-create-row">
+            <div className={`shell-create-row ${isSearchOpen ? 'is-search-open' : ''}`}>
               <button className="shell-new-chat" type="button" onClick={onNew}>
                 <span className="shell-new-chat-plus">+</span>
                 <span>New chat</span>
               </button>
               <button
-                className="shell-search-button"
+                className={`shell-search-button ${isSearchOpen ? 'is-active' : ''}`}
                 type="button"
-                aria-label="Search conversations"
+                aria-label={isSearchOpen ? 'Close search' : 'Search conversations'}
+                data-tooltip={isSearchOpen ? 'Close search' : 'Search conversations'}
+                onClick={handleToggleSearch}
               >
-                <Icon name="search" />
+                <Icon name={isSearchOpen ? 'close' : 'search'} />
               </button>
+            </div>
+
+            <div className={`shell-search-panel ${isSearchOpen ? 'is-open' : ''}`}>
+              <div className="shell-search-input-wrap">
+                <span className="shell-search-input-icon">
+                  <Icon name="search" />
+                </span>
+                <input
+                  ref={searchInputRef}
+                  type="text"
+                  value={searchQuery}
+                  placeholder="Search conversations..."
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  onKeyDown={handleSearchKeyDown}
+                />
+                {searchQuery ? (
+                  <button
+                    type="button"
+                    className="shell-search-clear"
+                    aria-label="Clear search"
+                    onClick={() => setSearchQuery('')}
+                  >
+                    <Icon name="close" />
+                  </button>
+                ) : null}
+              </div>
+              <div className="shell-search-meta">
+                <span>
+                  {hasSearchQuery
+                    ? `${searchResultCount} result${searchResultCount === 1 ? '' : 's'}`
+                    : 'Type to filter your conversations in real time'}
+                </span>
+              </div>
             </div>
 
             <div className="shell-section-head">
-              <span>Your conversations</span>
-              <button type="button" className="shell-clear-button">
-                Clear All
+              <span>{showSearchResults ? 'Search results' : 'Your conversations'}</span>
+              {isClearConfirming ? (
+                <div className="shell-clear-confirm">
+                  <button
+                    type="button"
+                    className="shell-clear-cancel"
+                    onClick={() => setIsClearConfirming(false)}
+                    disabled={isClearingAll}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="shell-clear-confirm-button"
+                    onClick={handleClearAll}
+                    disabled={!hasConversations || isClearingAll}
+                  >
+                    {isClearingAll ? 'Clearing...' : 'Confirm'}
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  className="shell-clear-button"
+                  onClick={handleClearAll}
+                  disabled={!hasConversations || isClearingAll}
+                >
+                  {isClearingAll ? 'Clearing...' : 'Clear All'}
+                </button>
+              )}
+            </div>
+
+            {showOrdinaryGroup ? (
+              <>
+                <div className="shell-section-label">普通聊天</div>
+                <ConversationList
+                  conversations={ordinaryConversations}
+                  activeId={activeId}
+                  editingConversationId={editingConversationId}
+                  editingTitle={editingTitle}
+                  onSelect={onSelect}
+                  onEditingTitleChange={setEditingTitle}
+                  onEditingSubmit={handleRenameSubmit}
+                  onEditingCancel={handleRenameCancel}
+                  renderActions={renderConversationActions}
+                />
+
+                {ordinaryConversations.length === 0 ? (
+                  <div className="shell-empty-history">Your ordinary chats will appear here.</div>
+                ) : null}
+
+                <div className="shell-divider" />
+              </>
+            ) : null}
+
+            <div className="shell-section-head shell-section-head--projects">
+              <span>Projects</span>
+              <button
+                type="button"
+                className="shell-project-add"
+                aria-label="Create project"
+                onClick={() => setIsProjectDialogOpen(true)}
+              >
+                +
               </button>
             </div>
 
-            <div className="shell-conversation-list">
-              {primaryConversations.map((conversation) => {
-                const isActive = conversation.id === activeId;
-
-                return (
-                  <div
-                    key={conversation.id}
-                    className={`shell-conversation-item ${isActive ? 'is-active' : ''}`}
-                    onClick={() => onSelect(conversation.id)}
-                  >
-                    <button
-                      type="button"
-                      className="shell-conversation-select"
-                      onClick={() => onSelect(conversation.id)}
-                    >
-                      <span className="shell-conversation-title">
-                        {formatConversationTitle(conversation.title)}
-                      </span>
-                    </button>
-
-                    <span className="shell-conversation-actions">
-                      <ConversationMenu
-                        conversationId={conversation.id}
-                        isOpen={openConversationMenuId === conversation.id}
-                        onToggle={() =>
-                          setOpenConversationMenuId((prev) =>
-                            prev === conversation.id ? null : conversation.id
-                          )
-                        }
-                        onDelete={handleConversationDelete}
-                      />
-                    </span>
-                  </div>
-                );
-              })}
-
-              {primaryConversations.length === 0 && (
-                <div className="shell-empty-history">Your recent chats will appear here.</div>
-              )}
-            </div>
-
-            <div className="shell-divider" />
-
-            <div className="shell-section-label">Last 7 Days</div>
-            <div className="shell-conversation-list shell-conversation-list--recent">
-              {recentConversations.map((conversation) => (
-                <div
-                  key={conversation.id}
-                  className="shell-conversation-item"
-                  onClick={() => onSelect(conversation.id)}
-                >
-                  <button
-                    type="button"
-                    className="shell-conversation-select"
-                    onClick={() => onSelect(conversation.id)}
-                  >
-                    <span className="shell-conversation-title">
-                      {formatConversationTitle(conversation.title)}
-                    </span>
-                  </button>
-                  <span className="shell-conversation-actions">
-                    <ConversationMenu
-                      conversationId={conversation.id}
-                      isOpen={openConversationMenuId === conversation.id}
-                      onToggle={() =>
-                        setOpenConversationMenuId((prev) =>
-                          prev === conversation.id ? null : conversation.id
-                        )
-                      }
-                      onDelete={handleConversationDelete}
-                    />
-                  </span>
-                </div>
+            <div className="shell-project-list">
+              {visibleProjects.map((project) => (
+                <ProjectGroup
+                  key={project.id}
+                  project={project}
+                  conversations={conversationsByProject.get(project.id) ?? []}
+                  activeId={activeId}
+                  activeProjectId={activeProjectId}
+                  onNewChat={() => onNewProjectChat(project.id)}
+                  onRenameProject={onRenameProject}
+                  onArchiveProject={onArchiveProject}
+                  editingConversationId={editingConversationId}
+                  editingTitle={editingTitle}
+                  onSelect={onSelect}
+                  onEditingTitleChange={setEditingTitle}
+                  onEditingSubmit={handleRenameSubmit}
+                  onEditingCancel={handleRenameCancel}
+                  renderActions={renderConversationActions}
+                />
               ))}
-
-              {recentConversations.length === 0 && (
-                <div className="shell-muted-item">
-                  <span>Min States For Binary DFA</span>
-                </div>
-              )}
             </div>
+
+            {showSearchResults && filteredConversations.length === 0 ? (
+              <div className="shell-search-empty">
+                <strong>No conversations found</strong>
+                <span>Try a different keyword or clear the search.</span>
+              </div>
+            ) : null}
+
+            {!showSearchResults && visibleProjects.length === 0 ? (
+              <div className="shell-muted-item">
+                <span>No projects yet.</span>
+              </div>
+            ) : null}
+
+            {isProjectDialogOpen ? (
+              <ProjectFormDialog
+                title="Create project"
+                onSubmit={(name) => {
+                  setIsProjectDialogOpen(false);
+                  onNewProject(name);
+                }}
+                onClose={() => setIsProjectDialogOpen(false)}
+              />
+            ) : null}
 
             <div className="shell-sidebar-spacer" />
 
@@ -302,25 +653,24 @@ export default function Sidebar({
                 aria-expanded={isProfileMenuOpen}
                 aria-label="Open profile menu"
               >
-                <img
-                  className="shell-avatar-chip"
-                  src="https://cube.elemecdn.com/3/7c/3ea6beec64369c2642b92c6726f1epng.png"
-                  alt="Andrew Neilson"
-                />
-                <span>Andrew Neilson</span>
+                <span className="shell-avatar-chip shell-avatar-initials" aria-hidden="true">
+                  {currentUserInitials}
+                </span>
+                <span>{currentUserLabel}</span>
               </button>
 
               {isProfileMenuOpen && (
                 <div className="shell-profile-menu">
                   <button type="button" className="shell-profile-card">
-                    <img
-                      className="shell-profile-card-avatar"
-                      src="https://cube.elemecdn.com/3/7c/3ea6beec64369c2642b92c6726f1epng.png"
-                      alt="Andrew Neilson"
-                    />
+                    <span
+                      className="shell-profile-card-avatar shell-avatar-initials"
+                      aria-hidden="true"
+                    >
+                      {currentUserInitials}
+                    </span>
                     <span className="shell-profile-card-copy">
-                      <strong>Andrew Neilson</strong>
-                      <span>Plus</span>
+                      <strong>{currentUserLabel}</strong>
+                      <span>{currentUser.email}</span>
                     </span>
                     <span className="shell-profile-card-arrow">
                       <Icon name="arrow-right" />
@@ -358,7 +708,14 @@ export default function Sidebar({
                       <Icon name="help" />
                       <span className="shell-profile-menu-label">Help</span>
                     </button>
-                    <button type="button" className="shell-profile-menu-item">
+                    <button
+                      type="button"
+                      className="shell-profile-menu-item"
+                      onClick={() => {
+                        setIsProfileMenuOpen(false);
+                        onLogout();
+                      }}
+                    >
                       <Icon name="logout" />
                       <span className="shell-profile-menu-label">Log out</span>
                     </button>
@@ -390,8 +747,9 @@ export default function Sidebar({
 
           <button
             type="button"
-            className="shell-compact-icon"
+            className={`shell-compact-icon ${isSearchOpen ? 'is-active' : ''}`}
             aria-label="Search conversations"
+            onClick={handleToggleSearch}
           >
             <Icon name="search" />
           </button>
@@ -420,11 +778,9 @@ export default function Sidebar({
             aria-label="Open settings"
             onClick={onOpenSettings}
           >
-            <img
-              className="shell-compact-avatar-dot"
-              src="https://cube.elemecdn.com/3/7c/3ea6beec64369c2642b92c6726f1epng.png"
-              alt="Andrew Neilson"
-            />
+            <span className="shell-compact-avatar-dot shell-avatar-initials" aria-hidden="true">
+              {currentUserInitials}
+            </span>
           </button>
         </div>
       </div>

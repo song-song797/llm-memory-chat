@@ -1,0 +1,37 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git pull:*)",
+      "Bash(git config:*)",
+      "Bash(git fetch:*)",
+      "Bash(pip install:*)",
+      "Bash(npm install:*)",
+      "Bash(alembic upgrade:*)",
+      "Bash(alembic current:*)",
+      "Bash(npm -v)",
+      "Bash(where node:*)",
+      "Bash(where npm:*)",
+      "Bash(powershell:*)",
+      "Bash(npm run:*)",
+      "Bash(volta list:*)",
+      "Bash(volta install:*)",
+      "Bash(volta pin:*)",
+      "Bash(netstat -ano)",
+      "Bash(taskkill:*)",
+      "WebSearch",
+      "Bash(where code:*)",
+      "Bash(code:*)",
+      "Bash(python -m py_compile app/models.py app/schemas.py app/services/memory_service.py app/routers/conversations.py app/routers/chat.py)",
+      "Bash(npx tsc:*)",
+      "Bash(head -5 alembic/versions/*.py)",
+      "Bash(python -c ':*)",
+      "Bash(pkill -f \"vite\")",
+      "Bash(cmd.exe /c \"taskkill /F /PID 36068\")",
+      "Bash(cmd.exe /c \"taskkill /F /PID 28836\")",
+      "Bash(cmd.exe:*)",
+      "Bash(wmic process:*)",
+      "Bash(git add:*)",
+      "Bash(git rm:*)"
+    ]
+  }
+}

@@ -1,14 +1,14 @@
 import type { ModelOption, ReasoningLevel } from '../types';
 
-interface SettingsDrawerProps {
+interface ModelPickerPopoverProps {
   isOpen: boolean;
   modelOptions: ModelOption[];
   selectedModel: string;
   selectedOption: ModelOption | null;
-  onModelChange: (value: string) => void;
   reasoningLevel: ReasoningLevel;
-  onReasoningLevelChange: (level: ReasoningLevel) => void;
-  onClose: () => void;
+  onModelChange(value: string): void;
+  onReasoningLevelChange(level: ReasoningLevel): void;
+  onClose(): void;
 }
 
 function getLatencyLabel(latencyHint?: string | null): string {
@@ -63,68 +63,77 @@ function getReasoningHint(option?: ModelOption | null): string {
   }
 }
 
-export default function SettingsDrawer({
+export default function ModelPickerPopover({
   isOpen,
   modelOptions,
   selectedModel,
   selectedOption,
-  onModelChange,
   reasoningLevel,
+  onModelChange,
   onReasoningLevelChange,
   onClose,
-}: SettingsDrawerProps) {
+}: ModelPickerPopoverProps) {
+  if (!isOpen) {
+    return null;
+  }
+
   const reasoningOptions = getReasoningOptions(selectedOption);
 
-  return (
-    <div className={`settings-layer ${isOpen ? 'is-open' : ''}`} aria-hidden={!isOpen}>
-      <button className="settings-backdrop" type="button" onClick={onClose} />
-      <aside className="settings-drawer">
-        <div className="settings-header">
-          <div>
-            <p className="settings-kicker">Current setup</p>
-            <h2>Chat settings</h2>
-          </div>
-          <button type="button" className="settings-close" onClick={onClose} aria-label="Close settings">
-            <span />
-            <span />
-          </button>
-        </div>
+  const handleModelChange = (value: string) => {
+    onModelChange(value);
+    onClose();
+  };
 
-        <section className="settings-section">
-          <div className="settings-section-head">
+  return (
+    <div className="model-picker-layer">
+      <button
+        type="button"
+        className="model-picker-backdrop"
+        aria-label="Close model picker"
+        onClick={onClose}
+      />
+      <aside className="model-picker-popover" aria-label="Model picker">
+        <section className="model-picker-section">
+          <div className="model-picker-head">
             <h3>Model</h3>
             <span>{selectedOption ? getLatencyLabel(selectedOption.latency_hint) : 'Loading'}</span>
           </div>
-          <div className="settings-option-grid">
-            {modelOptions.map((option) => {
-              const isActive = option.id === selectedModel;
-              return (
-                <button
-                  key={option.id}
-                  type="button"
-                  className={`settings-option-card ${isActive ? 'is-active' : ''}`}
-                  onClick={() => onModelChange(option.id)}
-                >
-                  <strong>{option.label}</strong>
-                  <span>{getLatencyLabel(option.latency_hint)}</span>
-                </button>
-              );
-            })}
-          </div>
+          {modelOptions.length > 0 ? (
+            <div className="model-picker-grid">
+              {modelOptions.map((option) => {
+                const isActive = option.id === selectedModel;
+                return (
+                  <button
+                    key={option.id}
+                    type="button"
+                    className={`model-picker-option ${isActive ? 'is-active' : ''}`}
+                    onClick={() => handleModelChange(option.id)}
+                  >
+                    <strong>{option.label}</strong>
+                    <span>{getLatencyLabel(option.latency_hint)}</span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="model-picker-empty">No models are available right now.</div>
+          )}
         </section>
 
-        <section className="settings-section">
-          <div className="settings-section-head">
+        <section className="model-picker-section">
+          <div className="model-picker-head">
             <h3>Reasoning</h3>
             <span>{selectedOption?.experimental_reasoning ? 'Experimental' : 'Stable'}</span>
           </div>
           {reasoningOptions.length > 0 ? (
-            <div className="settings-chip-row">
+            <div className="model-picker-chip-row">
               {reasoningOptions.map((option) => (
                 <button
                   key={option.value}
                   type="button"
-                  className={`settings-chip ${reasoningLevel === option.value ? 'is-active' : ''}`}
+                  className={`model-picker-chip ${
+                    reasoningLevel === option.value ? 'is-active' : ''
+                  }`}
                   onClick={() => onReasoningLevelChange(option.value)}
                 >
                   {option.label}
@@ -132,9 +141,9 @@ export default function SettingsDrawer({
               ))}
             </div>
           ) : (
-            <div className="settings-empty">No reasoning modes are available for this model.</div>
+            <div className="model-picker-empty">No reasoning modes are available for this model.</div>
           )}
-          <p className="settings-hint">{getReasoningHint(selectedOption)}</p>
+          <p className="model-picker-hint">{getReasoningHint(selectedOption)}</p>
         </section>
       </aside>
     </div>
