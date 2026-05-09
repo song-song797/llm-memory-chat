@@ -503,7 +503,7 @@ async def regenerate_message(
     if chosen_model not in get_supported_model_ids():
         raise HTTPException(status_code=400, detail=f"Model `{chosen_model}` is not supported")
 
-    # Build context
+    # Build context - exclude the assistant message being regenerated
     try:
         context = memory_service.get_chat_context_messages(
             db,
@@ -511,10 +511,16 @@ async def regenerate_message(
             conversation_id,
             current_model=chosen_model,
             project_id=conv.project_id,
+            exclude_after_message_id=parent_message.id,
         )
     except Exception as error:
         print(f"Failed to load context for regeneration: {error}")
-        context = memory_service.get_context_messages(db, conversation_id, current_model=chosen_model)
+        context = memory_service.get_context_messages(
+            db,
+            conversation_id,
+            current_model=chosen_model,
+            exclude_after_message_id=parent_message.id,
+        )
 
     conv_id = conv.id
     parent_message_id = parent_message.id

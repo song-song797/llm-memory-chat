@@ -139,11 +139,15 @@ def get_context_messages(
     db: Session,
     conversation_id: str,
     current_model: str | None = None,
+    exclude_after_message_id: str | None = None,
 ) -> list[dict[str, object]]:
     """Retrieve recent messages as LLM context.
 
     Returns the last N messages (configured by CONTEXT_WINDOW_SIZE)
     formatted as [{role, content}] dicts ready for the LLM API.
+
+    If exclude_after_message_id is provided, only returns messages up to and including
+    that message ID (for regeneration: exclude the old assistant response and anything after).
     """
     stmt = (
         select(Message)
@@ -152,6 +156,12 @@ def get_context_messages(
         .order_by(Message.created_at.desc())
         .limit(settings.CONTEXT_WINDOW_SIZE)
     )
+    if exclude_after_message_id is not None:
+        # Get the position of the reference message
+        ref_msg = db.get(Message, exclude_after_message_id)
+        if ref_msg and ref_msg.conversation_id == conversation_id:
+            stmt = stmt.where(Message.created_at <= ref_msg.created_at)
+
     messages = list(db.execute(stmt).scalars().all())
     messages.reverse()  # Oldest first
 
@@ -164,6 +174,7 @@ def get_chat_context_messages(
     conversation_id: str,
     current_model: str | None = None,
     project_id: str | None = None,
+    exclude_after_message_id: str | None = None,
 ) -> list[dict[str, object]]:
     context: list[dict[str, object]] = []
     long_term_context = get_long_term_memory_context(
@@ -174,7 +185,14 @@ def get_chat_context_messages(
     )
     if long_term_context:
         context.append(long_term_context)
-    context.extend(get_context_messages(db, conversation_id, current_model=current_model))
+    context.extend(
+        get_context_messages(
+            db,
+            conversation_id,
+            current_model=current_model,
+            exclude_after_message_id=exclude_after_message_id,
+        )
+    )
     return context
 
 
