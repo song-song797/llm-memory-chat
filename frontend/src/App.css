@@ -3107,12 +3107,10 @@
   border-radius: 50%;
   color: #ffffff;
   background: linear-gradient(135deg, #7b8dff, #5665ff);
-  box-shadow: 0 14px 24px rgba(86, 101, 255, 0.34);
 }
 
 .composer-send-button.is-stop {
   background: linear-gradient(135deg, #2a2c35, #111217);
-  box-shadow: 0 14px 24px rgba(17, 18, 23, 0.24);
 }
 
 .composer-send-button:disabled {
