@@ -6,6 +6,7 @@ from ..database import get_db
 from ..models import Conversation, MemoryCandidate, User
 from ..schemas import MemoryCandidateAccept, MemoryCandidateOut, MemoryCandidateReviewOut
 from ..services import memory_candidate_service, memory_document_service, memory_service
+from ..services import memory_embedding_service
 from ..services.auth_service import get_current_user
 from ..services.project_service import get_user_project
 
@@ -119,6 +120,13 @@ def accept_memory_candidate(
         candidate.project_id,
         candidate.conversation_id,
     )
+    # Schedule embedding generation if memory was created
+    if memory is not None:
+        background_tasks.add_task(
+            memory_embedding_service.generate_embedding_async,
+            memory.id,
+            memory.content,
+        )
     return {
         "candidate": candidate,
         "memory": memory,

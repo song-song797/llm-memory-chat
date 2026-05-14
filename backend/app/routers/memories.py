@@ -1,4 +1,4 @@
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -6,7 +6,8 @@ from ..database import get_db
 from ..models import Conversation, Memory, User, _utcnow
 from ..schemas import MemoryCreate, MemoryOut, MemoryUpdate
 from ..services.auth_service import get_current_user
-from ..services import memory_document_service, memory_service
+from ..services import memory_audit_service, memory_document_service, memory_history_service, memory_service
+from ..services import memory_embedding_service
 from ..services.project_service import get_user_project
 
 router = APIRouter(prefix="/api/memories", tags=["memories"])
@@ -118,6 +119,7 @@ def list_memories(
 def create_memory(
     body: MemoryCreate,
     background_tasks: BackgroundTasks,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -147,6 +149,22 @@ def create_memory(
     db.add(memory)
     db.commit()
     db.refresh(memory)
+
+    # Create history version and audit log
+    memory_history_service.create_history_version(
+        db, memory, action="create", change_reason="Manual memory creation"
+    )
+    ip_address = request.client.host if request.client else None
+    memory_audit_service.create_audit_log(
+        db,
+        memory_id=memory.id,
+        user_id=current_user.id,
+        action="create",
+        action_type="manual",
+        after_state=memory_history_service.serialize_memory_state(memory),
+        ip_address=ip_address,
+    )
+
     _schedule_memory_document_refresh(
         background_tasks,
         db,
@@ -155,6 +173,14 @@ def create_memory(
         memory.project_id,
         memory.conversation_id,
     )
+
+    # Schedule embedding generation
+    background_tasks.add_task(
+        memory_embedding_service.generate_embedding_async,
+        memory.id,
+        memory.content,
+    )
+
     return memory
 
 
@@ -163,6 +189,7 @@ def update_memory(
     memory_id: str,
     body: MemoryUpdate,
     background_tasks: BackgroundTasks,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -173,6 +200,9 @@ def update_memory(
     submitted_fields = body.model_fields_set
     if not submitted_fields:
         raise HTTPException(status_code=400, detail="No memory changes provided")
+
+    # Capture before state for audit log
+    before_state = memory_history_service.serialize_memory_state(memory)
 
     if "content" in submitted_fields:
         if body.content is None:
@@ -217,6 +247,23 @@ def update_memory(
 
     db.commit()
     db.refresh(memory)
+
+    # Create history version and audit log
+    memory_history_service.create_history_version(
+        db, memory, action="update", change_reason="Manual memory update"
+    )
+    ip_address = request.client.host if request.client else None
+    memory_audit_service.create_audit_log(
+        db,
+        memory_id=memory.id,
+        user_id=current_user.id,
+        action="update",
+        action_type="manual",
+        before_state=before_state,
+        after_state=memory_history_service.serialize_memory_state(memory),
+        ip_address=ip_address,
+    )
+
     _schedule_memory_document_refresh(
         background_tasks,
         db,
@@ -238,6 +285,15 @@ def update_memory(
             memory.project_id,
             memory.conversation_id,
         )
+
+    # Schedule embedding update if content changed
+    if "content" in submitted_fields:
+        background_tasks.add_task(
+            memory_embedding_service.generate_embedding_async,
+            memory.id,
+            memory.content,
+        )
+
     return memory
 
 
@@ -245,10 +301,27 @@ def update_memory(
 def delete_memory(
     memory_id: str,
     background_tasks: BackgroundTasks,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     memory = _get_user_memory(db, current_user.id, memory_id)
+
+    # Capture before state for audit log
+    before_state = memory_history_service.serialize_memory_state(memory)
+    ip_address = request.client.host if request.client else None
+
+    # Create audit log before deletion
+    memory_audit_service.create_audit_log(
+        db,
+        memory_id=memory.id,
+        user_id=current_user.id,
+        action="delete",
+        action_type="manual",
+        before_state=before_state,
+        ip_address=ip_address,
+    )
+
     scope = memory.scope
     project_id = memory.project_id
     conversation_id = memory.conversation_id

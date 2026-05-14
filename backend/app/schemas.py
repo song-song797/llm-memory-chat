@@ -322,3 +322,108 @@ class ModelOption(BaseModel):
 class ModelCatalog(BaseModel):
     default_model: str
     models: list[ModelOption]
+
+
+# Memory History schemas
+class MemoryHistoryOut(BaseModel):
+    id: str
+    memory_id: str
+    parent_history_id: str | None = None
+    version_number: int
+    is_current: bool
+    content: str
+    kind: str
+    scope: str
+    status: str
+    importance: int
+    enabled: bool
+    change_reason: str | None = None
+    changed_by_action: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+    @field_serializer("created_at")
+    def serialize_created_at(self, value: datetime) -> str:
+        return _serialize_datetime(value)
+
+
+class MemoryHistoryListResponse(BaseModel):
+    total: int
+    current_version: int
+    versions: list[MemoryHistoryOut]
+
+
+# Memory Audit Log schemas
+AuditAction = Literal["create", "update", "delete", "access", "archive"]
+AuditActionType = Literal["manual", "api", "automatic", "system"]
+
+
+class MemoryAuditLogOut(BaseModel):
+    id: str
+    memory_id: str
+    user_id: str
+    action: str
+    action_type: str
+    before_state: str | None = None
+    after_state: str | None = None
+    details: str | None = None
+    ip_address: str | None = None
+    request_id: str | None = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+    @field_serializer("created_at")
+    def serialize_created_at(self, value: datetime) -> str:
+        return _serialize_datetime(value)
+
+
+class MemoryAuditLogListResponse(BaseModel):
+    total: int
+    logs: list[MemoryAuditLogOut]
+
+
+# Chat V1 schemas
+MemoryInjectionScope = Literal["global", "project", "conversation", "all"]
+
+
+class MemoryInjectionConfig(BaseModel):
+    memory_enabled: bool = True
+    memory_limit: int | None = Field(default=None, ge=1, le=100)
+    memory_scope: MemoryInjectionScope = "all"
+    include_memory_info: bool = False
+
+
+class ChatV1Request(BaseModel):
+    conversation_id: str | None = None
+    project_id: str | None = None
+    message: str = Field(default="", max_length=10000)
+    model: str | None = None
+    reasoning_level: Literal["off", "standard", "deep"] | None = None
+    mode: Literal["fast", "think"] | None = None
+    memory: MemoryInjectionConfig = Field(default_factory=MemoryInjectionConfig)
+
+
+class ChatAutoRequest(BaseModel):
+    conversation_id: str | None = None
+    project_id: str | None = None
+    message: str = Field(default="", max_length=10000)
+    model: str | None = None
+    reasoning_level: Literal["off", "standard", "deep"] | None = None
+    mode: Literal["fast", "think"] | None = None
+
+
+class ChatSimpleRequest(BaseModel):
+    conversation_id: str
+    message: str = Field(default="", max_length=10000)
+    model: str | None = None
+    reasoning_level: Literal["off", "standard", "deep"] | None = None
+    mode: Literal["fast", "think"] | None = None
+
+
+class ChatMemoryInfo(BaseModel):
+    enabled: bool
+    scope: str
+    count: int
+    memory_ids: list[str] = []

@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session, selectinload
 from ..config import get_model_label, settings
 from ..models import Attachment, Conversation, Memory, Message
 from .attachment_service import get_attachment_path
-from . import memory_document_service
+from . import memory_document_service, vector_search_service
 
 
 def store_message(
@@ -175,6 +175,7 @@ def get_chat_context_messages(
     current_model: str | None = None,
     project_id: str | None = None,
     exclude_after_message_id: str | None = None,
+    query_context: str | None = None,
 ) -> list[dict[str, object]]:
     context: list[dict[str, object]] = []
     long_term_context = get_long_term_memory_context(
@@ -182,6 +183,7 @@ def get_chat_context_messages(
         user_id,
         project_id=project_id,
         conversation_id=conversation_id,
+        query_context=query_context,
     )
     if long_term_context:
         context.append(long_term_context)
@@ -341,7 +343,44 @@ def get_enabled_memories_for_context(
     user_id: str,
     project_id: str | None = None,
     conversation_id: str | None = None,
+    query_context: str | None = None,
 ) -> list[Memory]:
+    """Get enabled memories for context injection.
+
+    When vector search is available and query_context is provided,
+    uses semantic similarity search instead of time-based ordering.
+
+    Args:
+        db: Database session.
+        user_id: The user ID.
+        project_id: Optional project ID.
+        conversation_id: Optional conversation ID.
+        query_context: Optional query text for semantic search.
+
+    Returns:
+        List of Memory objects.
+    """
+    # Try vector search first if enabled and query provided
+    if query_context and vector_search_service.is_vector_search_available(db):
+        try:
+            memories = vector_search_service.search_memories_by_text(
+                db,
+                query_context,
+                user_id,
+                scope="all",
+                project_id=project_id,
+                conversation_id=conversation_id,
+                top_k=settings.VECTOR_SEARCH_TOP_K,
+                threshold=settings.VECTOR_SEARCH_THRESHOLD,
+            )
+            if memories or not settings.EMBEDDING_FALLBACK_TO_TIME_SORT:
+                return memories
+        except Exception:
+            # Fall back to time-based sorting on error
+            if not settings.EMBEDDING_FALLBACK_TO_TIME_SORT:
+                return []
+
+    # Time-based sorting (original logic or fallback)
     def load_scope_memories(scope: str, limit: int, *filters) -> list[Memory]:
         if limit <= 0:
             return []
@@ -384,6 +423,7 @@ def get_long_term_memory_context(
     user_id: str,
     project_id: str | None = None,
     conversation_id: str | None = None,
+    query_context: str | None = None,
 ) -> dict[str, str] | None:
     documents_by_scope = {}
     global_document = memory_document_service.get_memory_document(db, user_id, "global")
@@ -417,6 +457,7 @@ def get_long_term_memory_context(
         user_id,
         project_id=project_id,
         conversation_id=conversation_id,
+        query_context=query_context,
     )
 
     global_memories = [

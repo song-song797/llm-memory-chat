@@ -22,6 +22,7 @@ from ..services import (
     llm_service,
     memory_candidate_service,
     memory_document_service,
+    memory_embedding_service,
     memory_extraction_service,
     memory_service,
 )
@@ -170,7 +171,7 @@ async def _extract_and_store_memory_candidate(
             return
 
         if scope == "conversation" and settings.MEMORY_CONVERSATION_AUTO_ACCEPT:
-            memory_candidate_service.auto_accept_memory_candidate(
+            _, memory, _ = memory_candidate_service.auto_accept_memory_candidate(
                 db,
                 user_id=user_id,
                 scope=scope,
@@ -186,6 +187,12 @@ async def _extract_and_store_memory_candidate(
                 source_message_id=source_message_id,
                 extraction_model=memory_model,
             )
+            # Generate embedding for auto-accepted memory
+            if memory is not None:
+                memory_embedding_service.generate_embedding_async(
+                    memory.id,
+                    memory.content,
+                )
             await conversation_memory_service.compact_conversation_memories(
                 db,
                 user_id=user_id,
@@ -313,7 +320,7 @@ async def chat(
             else:
                 candidate_action = "update" if match_action == "update" else "create"
                 if scope == "conversation" and settings.MEMORY_CONVERSATION_AUTO_ACCEPT:
-                    memory_candidate_service.auto_accept_memory_candidate(
+                    _, memory, _ = memory_candidate_service.auto_accept_memory_candidate(
                         db,
                         user_id=current_user.id,
                         scope=scope,
@@ -333,6 +340,12 @@ async def chat(
                         source_message_id=user_message.id,
                         extraction_model=get_memory_model(),
                     )
+                    # Generate embedding for auto-accepted memory
+                    if memory is not None:
+                        memory_embedding_service.generate_embedding_async(
+                            memory.id,
+                            memory.content,
+                        )
                     await conversation_memory_service.compact_conversation_memories(
                         db,
                         user_id=current_user.id,
@@ -393,6 +406,7 @@ async def chat(
             conv.id,
             current_model=chosen_model,
             project_id=conv.project_id,
+            query_context=req.message.strip(),  # Use user message for semantic search
         )
     except Exception as error:
         db.rollback()
@@ -512,6 +526,7 @@ async def regenerate_message(
             current_model=chosen_model,
             project_id=conv.project_id,
             exclude_after_message_id=parent_message.id,
+            query_context=parent_message.content,  # Use original user message for semantic search
         )
     except Exception as error:
         print(f"Failed to load context for regeneration: {error}")

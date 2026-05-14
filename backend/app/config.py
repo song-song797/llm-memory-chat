@@ -130,6 +130,15 @@ class Settings(BaseSettings):
     MEMORY_CANDIDATE_CONFIDENCE_THRESHOLD: int = 70
     MEMORY_DOCUMENTS_AI_ENABLED: bool = False
     APP_TIMEZONE: str = "Asia/Shanghai"
+    # Embedding / Vector Search
+    EMBEDDING_ENABLED: bool = True
+    EMBEDDING_API_KEY: str = ""
+    EMBEDDING_BASE_URL: str = ""
+    EMBEDDING_MODEL: str = "text-embedding-3-small"
+    EMBEDDING_DIMENSION: int = 1536
+    VECTOR_SEARCH_TOP_K: int = 20
+    VECTOR_SEARCH_THRESHOLD: float = 0.7
+    EMBEDDING_FALLBACK_TO_TIME_SORT: bool = True
 
     model_config = SettingsConfigDict(
         env_file=BACKEND_DIR / ".env",

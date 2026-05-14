@@ -4,6 +4,13 @@ from datetime import datetime, timezone
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+try:
+    from pgvector.sqlalchemy import Vector
+    HAS_PGVECTOR = True
+except ImportError:
+    HAS_PGVECTOR = False
+    Vector = None
+
 from .database import Base
 
 
@@ -52,6 +59,11 @@ class User(Base):
         back_populates="user",
         cascade="all, delete-orphan",
         order_by="Project.updated_at.desc()",
+    )
+    audit_logs: Mapped[list["MemoryAuditLog"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+        order_by="MemoryAuditLog.created_at.desc()",
     )
 
 
@@ -183,6 +195,102 @@ class Memory(Base):
         foreign_keys=[source_candidate_id],
         post_update=True,
     )
+    history_versions: Mapped[list["MemoryHistory"]] = relationship(
+        back_populates="memory",
+        cascade="all, delete-orphan",
+        order_by="MemoryHistory.version_number.desc()",
+    )
+    audit_logs: Mapped[list["MemoryAuditLog"]] = relationship(
+        back_populates="memory",
+        cascade="all, delete-orphan",
+        order_by="MemoryAuditLog.created_at.desc()",
+    )
+    embedding_record: Mapped["MemoryEmbedding | None"] = relationship(
+        back_populates="memory",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+
+
+class MemoryHistory(Base):
+    __tablename__ = "memory_histories"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_new_id)
+    memory_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("memories.id", ondelete="CASCADE"), index=True
+    )
+    parent_history_id: Mapped[str | None] = mapped_column(
+        String(32), ForeignKey("memory_histories.id", ondelete="SET NULL"),
+        nullable=True, index=True
+    )
+    version_number: Mapped[int] = mapped_column(Integer, default=1)
+    is_current: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+
+    # 记忆状态快照
+    content: Mapped[str] = mapped_column(Text)
+    kind: Mapped[str] = mapped_column(String(40))
+    scope: Mapped[str] = mapped_column(String(20))
+    status: Mapped[str] = mapped_column(String(20))
+    importance: Mapped[int] = mapped_column(Integer, default=0)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    change_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    changed_by_action: Mapped[str] = mapped_column(String(20))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    memory: Mapped["Memory"] = relationship(back_populates="history_versions")
+    parent_history: Mapped["MemoryHistory | None"] = relationship(
+        remote_side="MemoryHistory.id", foreign_keys=[parent_history_id]
+    )
+
+
+class MemoryAuditLog(Base):
+    __tablename__ = "memory_audit_logs"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_new_id)
+    memory_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("memories.id", ondelete="CASCADE"), index=True
+    )
+    user_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+
+    action: Mapped[str] = mapped_column(String(20), index=True)  # create/update/delete/access/archive
+    action_type: Mapped[str] = mapped_column(String(20))  # manual/api/automatic/system
+
+    before_state: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON
+    after_state: Mapped[str | None] = mapped_column(Text, nullable=True)   # JSON
+    details: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON
+    ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)
+    request_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, index=True)
+
+    memory: Mapped["Memory"] = relationship(back_populates="audit_logs")
+    user: Mapped["User"] = relationship(back_populates="audit_logs")
+
+
+class MemoryEmbedding(Base):
+    __tablename__ = "memory_embeddings"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_new_id)
+    memory_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("memories.id", ondelete="CASCADE"), index=True
+    )
+    embedding: Mapped[list[float] | None] = mapped_column(
+        Vector(1536) if HAS_PGVECTOR else Text,
+        nullable=True
+    )
+    model_name: Mapped[str] = mapped_column(String(100))
+    content_hash: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(20), default="pending")  # pending/ready/failed
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
+    )
+
+    memory: Mapped["Memory"] = relationship(back_populates="embedding_record")
 
 
 class MemoryCandidate(Base):

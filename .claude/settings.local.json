@@ -32,7 +32,12 @@
       "Bash(wmic process:*)",
       "Bash(git add:*)",
       "Bash(git rm:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(python -c \"from app.main import app; from app.models import MemoryHistory, MemoryAuditLog; print\\('Models imported successfully'\\)\")",
+      "Bash(timeout 10 uvicorn app.main:app --host 127.0.0.1 --port 8001)",
+      "Bash(python -c \"from app.main import app; print\\('Backend app OK'\\)\")",
+      "Bash(python -c \"from app.services import embedding_service, memory_embedding_service, vector_search_service; print\\('All embedding services OK'\\)\")",
+      "Bash(python -c \"from app.main import app; from app.services import memory_embedding_service, vector_search_service, embedding_service; print\\('All imports OK'\\)\")"
     ]
   }
 }
