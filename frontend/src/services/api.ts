@@ -2,6 +2,7 @@ import type {
   Attachment,
   AuthResponse,
   Conversation,
+  DebugHistoryEntry,
   LandingAgentMessage,
   Memory,
   MemoryCandidate,
@@ -719,4 +720,63 @@ export async function switchMessageVersion(
     throw new Error(errorMessage);
   }
   return res.json();
+}
+
+export async function fetchDebugHistory(
+  limit = 50,
+  offset = 0
+): Promise<DebugHistoryEntry[]> {
+  const res = await apiFetch(`${API_BASE}/debug-history?limit=${limit}&offset=${offset}`);
+  if (!res.ok) {
+    const errorMessage = await getErrorMessage(res, 'Failed to fetch debug history');
+    throw new Error(errorMessage);
+  }
+  return res.json();
+}
+
+export async function createDebugHistory(input: {
+  model: string;
+  messages: string;
+  max_tokens: number;
+  stream: boolean;
+  include_usage: boolean;
+  thinking_enabled: boolean;
+  reasoning_level?: string | null;
+  response_status: number;
+  response_time_ms: number;
+  prompt_tokens?: number | null;
+  completion_tokens?: number | null;
+  total_tokens?: number | null;
+  error_message?: string | null;
+}): Promise<DebugHistoryEntry> {
+  const res = await apiFetch(`${API_BASE}/debug-history`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    const errorMessage = await getErrorMessage(res, 'Failed to create debug history');
+    throw new Error(errorMessage);
+  }
+  return res.json();
+}
+
+export async function deleteDebugHistoryEntry(entryId: string): Promise<void> {
+  const res = await apiFetch(`${API_BASE}/debug-history/${entryId}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) {
+    const errorMessage = await getErrorMessage(res, 'Failed to delete debug history entry');
+    throw new Error(errorMessage);
+  }
+}
+
+export async function clearDebugHistory(): Promise<void> {
+  const res = await apiFetch(`${API_BASE}/debug-history`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) {
+    const errorMessage = await getErrorMessage(res, 'Failed to clear debug history');
+    throw new Error(errorMessage);
+  }
 }

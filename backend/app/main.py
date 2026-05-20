@@ -11,6 +11,8 @@ from .routers import (
     chat,
     chat_v1,
     conversations,
+    debug,
+    debug_history,
     memories,
     memory_candidates,
     memory_documents,
@@ -51,6 +53,8 @@ app.include_router(memory_candidates.router)
 app.include_router(memory_documents.router)
 app.include_router(projects.router)
 app.include_router(audit.router)
+app.include_router(debug.router)
+app.include_router(debug_history.router)
 
 
 @app.get("/api/health")

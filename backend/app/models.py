@@ -65,6 +65,11 @@ class User(Base):
         cascade="all, delete-orphan",
         order_by="MemoryAuditLog.created_at.desc()",
     )
+    debug_history: Mapped[list["ApiDebugHistory"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+        order_by="ApiDebugHistory.created_at.desc()",
+    )
 
 
 class Project(Base):
@@ -404,3 +409,28 @@ class UserSession(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     user: Mapped["User"] = relationship(back_populates="sessions")
+
+
+class ApiDebugHistory(Base):
+    __tablename__ = "api_debug_history"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_new_id)
+    user_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    model: Mapped[str] = mapped_column(String(100))
+    messages: Mapped[str] = mapped_column(Text)  # JSON string
+    max_tokens: Mapped[int] = mapped_column(Integer, default=1024)
+    stream: Mapped[bool] = mapped_column(Boolean, default=True)
+    include_usage: Mapped[bool] = mapped_column(Boolean, default=True)
+    thinking_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    reasoning_level: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    response_status: Mapped[int] = mapped_column(Integer, default=0)
+    response_time_ms: Mapped[int] = mapped_column(Integer, default=0)
+    prompt_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    completion_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    total_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    user: Mapped["User"] = relationship(back_populates="debug_history")

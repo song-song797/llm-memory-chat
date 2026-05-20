@@ -167,3 +167,62 @@ export interface ComposerAttachment {
   size_bytes: number;
   preview_url?: string;
 }
+
+export interface DebugHistoryEntry {
+  id: string;
+  model: string;
+  messages: string;
+  max_tokens: number;
+  stream: boolean;
+  include_usage: boolean;
+  thinking_enabled: boolean;
+  reasoning_level?: string | null;
+  response_status: number;
+  response_time_ms: number;
+  prompt_tokens?: number | null;
+  completion_tokens?: number | null;
+  total_tokens?: number | null;
+  error_message?: string | null;
+  created_at: string;
+}
+
+export interface DebugMessage {
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+}
+
+export interface DebugParams {
+  model: string;
+  messages: DebugMessage[];
+  max_tokens: number;
+  stream: boolean;
+  stream_options: {
+    include_usage: boolean;
+  };
+  thinking?: {
+    type: 'enabled' | 'disabled';
+  };
+}
+
+// Chat API types
+export type ApiEndpoint = '/chat' | '/v1/chat' | '/v1/chat/auto' | '/v1/chat/simple';
+
+export type MemoryInjectionScope = 'global' | 'project' | 'conversation' | 'all';
+
+export interface MemoryInjectionConfig {
+  memory_enabled: boolean;
+  memory_limit: number | null;
+  memory_scope: MemoryInjectionScope;
+  include_memory_info: boolean;
+}
+
+export interface ChatApiParams {
+  endpoint: ApiEndpoint;
+  conversation_id: string | null;
+  project_id: string | null;
+  message: string;
+  model: string;
+  reasoning_level: ReasoningLevel;
+  mode: 'fast' | 'think' | null;
+  memory: MemoryInjectionConfig;
+}

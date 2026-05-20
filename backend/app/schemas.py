@@ -427,3 +427,44 @@ class ChatMemoryInfo(BaseModel):
     scope: str
     count: int
     memory_ids: list[str] = []
+
+
+# Api Debug History schemas
+class DebugHistoryCreate(BaseModel):
+    model: str = Field(..., max_length=100)
+    messages: str  # JSON string
+    max_tokens: int = 1024
+    stream: bool = True
+    include_usage: bool = True
+    thinking_enabled: bool = False
+    reasoning_level: Literal["off", "standard", "deep"] | None = None
+    response_status: int = 0
+    response_time_ms: int = 0
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    total_tokens: int | None = None
+    error_message: str | None = None
+
+
+class DebugHistoryOut(BaseModel):
+    id: str
+    model: str
+    messages: str
+    max_tokens: int
+    stream: bool
+    include_usage: bool
+    thinking_enabled: bool
+    reasoning_level: str | None = None
+    response_status: int
+    response_time_ms: int
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    total_tokens: int | None = None
+    error_message: str | None = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+    @field_serializer("created_at")
+    def serialize_created_at(self, value: datetime) -> str:
+        return _serialize_datetime(value)
