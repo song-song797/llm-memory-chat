@@ -403,6 +403,7 @@ class ChatV1Request(BaseModel):
     reasoning_level: Literal["off", "standard", "deep"] | None = None
     mode: Literal["fast", "think"] | None = None
     memory: MemoryInjectionConfig = Field(default_factory=MemoryInjectionConfig)
+    stream: bool = True
 
 
 class ChatAutoRequest(BaseModel):
@@ -412,6 +413,7 @@ class ChatAutoRequest(BaseModel):
     model: str | None = None
     reasoning_level: Literal["off", "standard", "deep"] | None = None
     mode: Literal["fast", "think"] | None = None
+    stream: bool = True
 
 
 class ChatSimpleRequest(BaseModel):
@@ -420,6 +422,7 @@ class ChatSimpleRequest(BaseModel):
     model: str | None = None
     reasoning_level: Literal["off", "standard", "deep"] | None = None
     mode: Literal["fast", "think"] | None = None
+    stream: bool = True
 
 
 class ChatMemoryInfo(BaseModel):
@@ -427,6 +430,12 @@ class ChatMemoryInfo(BaseModel):
     scope: str
     count: int
     memory_ids: list[str] = []
+
+
+class ChatNonStreamResponse(BaseModel):
+    conversation_id: str
+    content: str
+    model: str
 
 
 # Api Debug History schemas
@@ -468,3 +477,4 @@ class DebugHistoryOut(BaseModel):
     @field_serializer("created_at")
     def serialize_created_at(self, value: datetime) -> str:
         return _serialize_datetime(value)
+

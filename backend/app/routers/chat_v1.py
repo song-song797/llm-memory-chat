@@ -11,27 +11,30 @@ from ..models import Conversation, Memory, User
 from ..schemas import (
     ChatAutoRequest,
     ChatMemoryInfo,
+    ChatNonStreamResponse,
     ChatSimpleRequest,
     ChatV1Request,
 )
 from ..services import llm_service, memory_service
-from ..services.auth_service import get_current_user
+from ..services.auth_service import get_current_user, get_optional_user
 from ..services.project_service import get_user_project
 from ..config import settings
 
 router = APIRouter(prefix="/api/v1", tags=["chat-v1"])
 
 
-def _get_user_conversation(db: Session, user_id: str, conversation_id: str) -> Conversation:
+def _get_user_conversation(db: Session, user_id: str | None, conversation_id: str) -> Conversation:
     conv = db.get(Conversation, conversation_id)
-    if not conv or conv.user_id != user_id:
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    if user_id is not None and conv.user_id != user_id:
         raise HTTPException(status_code=404, detail="Conversation not found")
     return conv
 
 
 def _get_memories_for_scope(
     db: Session,
-    user_id: str,
+    user_id: str | None,
     scope: str,
     limit: int | None,
     project_id: str | None = None,
@@ -43,6 +46,8 @@ def _get_memories_for_scope(
     When query_context is provided and vector search is available,
     uses semantic similarity search instead of time-based ordering.
     """
+    if user_id is None:
+        return []
     if scope == "simple" or scope == "none":
         return []
 
@@ -131,6 +136,46 @@ def _build_memory_context(memories: list[Memory]) -> dict[str, str] | None:
     }
 
 
+async def _non_stream_chat(
+    context: list[dict[str, str]],
+    model: str,
+    reasoning_level: str | None,
+    conversation_id: str,
+    user_message_id: str | None = None,
+) -> ChatNonStreamResponse:
+    """Collect full LLM response and return as JSON."""
+    chunks: list[str] = []
+    async for chunk in llm_service.stream_chat_completion(
+        context,
+        model=model,
+        reasoning_level=reasoning_level,
+    ):
+        chunks.append(chunk)
+
+    full_content = "".join(chunks)
+
+    # Save assistant message
+    if full_content:
+        save_db = SessionLocal()
+        try:
+            memory_service.store_message(
+                save_db,
+                conversation_id,
+                "assistant",
+                full_content,
+                model=model,
+                parent_message_id=user_message_id,
+            )
+        finally:
+            save_db.close()
+
+    return ChatNonStreamResponse(
+        conversation_id=conversation_id,
+        content=full_content,
+        model=model,
+    )
+
+
 async def _stream_chat_with_context(
     context: list[dict[str, str]],
     model: str,
@@ -194,7 +239,7 @@ async def _stream_chat_with_context(
 async def chat_v1(
     body: ChatV1Request,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User | None = Depends(get_optional_user),
 ):
     """Configurable memory injection chat endpoint.
 
@@ -207,17 +252,19 @@ async def chat_v1(
     if not body.message.strip():
         raise HTTPException(status_code=400, detail="Message is required")
 
+    user_id = current_user.id if current_user else None
+
     created_new_conversation = body.conversation_id is None
 
     if body.conversation_id:
-        conv = _get_user_conversation(db, current_user.id, body.conversation_id)
+        conv = _get_user_conversation(db, user_id, body.conversation_id)
         if body.project_id is not None and body.project_id != conv.project_id:
             raise HTTPException(status_code=400, detail="Conversation project mismatch")
     else:
         project_id = None
-        if body.project_id:
+        if body.project_id and current_user:
             project_id = get_user_project(db, current_user.id, body.project_id).id
-        conv = Conversation(user_id=current_user.id, project_id=project_id)
+        conv = Conversation(user_id=user_id, project_id=project_id)
         db.add(conv)
         db.commit()
         db.refresh(conv)
@@ -240,7 +287,7 @@ async def chat_v1(
     if body.memory.memory_enabled:
         memories = _get_memories_for_scope(
             db,
-            current_user.id,
+            user_id,
             body.memory.memory_scope,
             body.memory.memory_limit,
             conv.project_id,
@@ -272,6 +319,11 @@ async def chat_v1(
 
     conv_id = conv.id
     user_message_id = user_message.id
+
+    if not body.stream:
+        return await _non_stream_chat(
+            context, chosen_model, body.reasoning_level, conv_id, user_message_id
+        )
 
     async def event_stream():
         full_response: list[str] = []
@@ -328,7 +380,7 @@ async def chat_v1(
 async def chat_auto(
     body: ChatAutoRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User | None = Depends(get_optional_user),
 ):
     """Auto memory injection chat endpoint.
 
@@ -338,17 +390,19 @@ async def chat_auto(
     if not body.message.strip():
         raise HTTPException(status_code=400, detail="Message is required")
 
+    user_id = current_user.id if current_user else None
+
     created_new_conversation = body.conversation_id is None
 
     if body.conversation_id:
-        conv = _get_user_conversation(db, current_user.id, body.conversation_id)
+        conv = _get_user_conversation(db, user_id, body.conversation_id)
         if body.project_id is not None and body.project_id != conv.project_id:
             raise HTTPException(status_code=400, detail="Conversation project mismatch")
     else:
         project_id = None
-        if body.project_id:
+        if body.project_id and current_user:
             project_id = get_user_project(db, current_user.id, body.project_id).id
-        conv = Conversation(user_id=current_user.id, project_id=project_id)
+        conv = Conversation(user_id=user_id, project_id=project_id)
         db.add(conv)
         db.commit()
         db.refresh(conv)
@@ -367,7 +421,7 @@ async def chat_auto(
     try:
         context = memory_service.get_chat_context_messages(
             db,
-            current_user.id,
+            user_id,
             conv.id,
             current_model=chosen_model,
             project_id=conv.project_id,
@@ -378,6 +432,11 @@ async def chat_auto(
 
     conv_id = conv.id
     user_message_id = user_message.id
+
+    if not body.stream:
+        return await _non_stream_chat(
+            context, chosen_model, body.reasoning_level, conv_id, user_message_id
+        )
 
     async def event_stream():
         full_response: list[str] = []
@@ -432,7 +491,7 @@ async def chat_auto(
 async def chat_simple(
     body: ChatSimpleRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User | None = Depends(get_optional_user),
 ):
     """Pure conversation chat endpoint.
 
@@ -441,7 +500,8 @@ async def chat_simple(
     if not body.message.strip():
         raise HTTPException(status_code=400, detail="Message is required")
 
-    conv = _get_user_conversation(db, current_user.id, body.conversation_id)
+    user_id = current_user.id if current_user else None
+    conv = _get_user_conversation(db, user_id, body.conversation_id)
 
     chosen_model = body.model or get_default_model()
     if chosen_model not in get_supported_model_ids():
@@ -454,6 +514,11 @@ async def chat_simple(
 
     conv_id = conv.id
     user_message_id = user_message.id
+
+    if not body.stream:
+        return await _non_stream_chat(
+            context, chosen_model, body.reasoning_level, conv_id, user_message_id
+        )
 
     async def event_stream():
         full_response: list[str] = []

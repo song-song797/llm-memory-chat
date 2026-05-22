@@ -81,3 +81,17 @@ def get_current_user(
         raise HTTPException(status_code=401, detail="Invalid session")
 
     return user
+
+
+def get_optional_user(
+    authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+) -> User | None:
+    if not authorization or not authorization.lower().startswith("bearer "):
+        return None
+
+    token = authorization.split(" ", 1)[1].strip()
+    if not token:
+        return None
+
+    return get_user_by_token(db, token)

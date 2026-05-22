@@ -50,6 +50,7 @@ function getDefaultParams(models: ModelOption[]): ChatApiParams {
       memory_scope: 'all',
       include_memory_info: false,
     },
+    stream: true,
   };
 }
 
@@ -91,20 +92,25 @@ export default function APIExplorerPage() {
     void bootstrapAuth();
   }, []);
 
-  // Fetch models and history after auth
+  // Fetch models on mount (no auth required)
   useEffect(() => {
-    if (!currentUser) return;
-
-    Promise.all([api.fetchModels(), api.fetchDebugHistory(50, 0)])
-      .then(([catalog, historyData]) => {
+    const loadInitialData = async () => {
+      try {
+        const catalog = await api.fetchModels();
         setModelOptions(catalog.models);
-        setHistory(historyData);
         setParams(getDefaultParams(catalog.models));
-      })
-      .catch((err) => {
+
+        if (currentUser) {
+          const historyData = await api.fetchDebugHistory(50, 0);
+          setHistory(historyData);
+        }
+      } catch (err) {
         console.error(err);
         toast.error('加载数据失败');
-      });
+      }
+    };
+
+    void loadInitialData();
   }, [currentUser]);
 
   // Build request payload based on endpoint
@@ -132,6 +138,7 @@ export default function APIExplorerPage() {
           message: p.message,
           mode: p.mode,
           memory: p.memory,
+          stream: p.stream,
         };
 
       case '/v1/chat/auto':
@@ -141,6 +148,7 @@ export default function APIExplorerPage() {
           project_id: p.project_id,
           message: p.message,
           mode: p.mode,
+          stream: p.stream,
         };
 
       case '/v1/chat/simple':
@@ -149,6 +157,7 @@ export default function APIExplorerPage() {
           conversation_id: p.conversation_id,
           message: p.message,
           mode: p.mode,
+          stream: p.stream,
         };
 
       default:
@@ -158,7 +167,7 @@ export default function APIExplorerPage() {
 
   // Handle debug request
   const handleDebug = useCallback(async () => {
-    if (!params || !currentUser) return;
+    if (!params) return;
 
     // Validate params for /v1/chat/simple
     if (params.endpoint === '/v1/chat/simple' && !params.conversation_id) {
@@ -190,7 +199,9 @@ export default function APIExplorerPage() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY)}`,
+          ...(window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY)
+            ? { Authorization: `Bearer ${window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY)}` }
+            : {}),
         },
         body: JSON.stringify(requestPayload),
       });
@@ -215,7 +226,133 @@ export default function APIExplorerPage() {
           error: errorMessage,
         });
 
-        // Save to history
+        // Save to history (requires auth)
+        if (currentUser) {
+          await api.createDebugHistory({
+            model: params.model,
+            messages: JSON.stringify([{ role: 'user', content: params.message }]),
+            max_tokens: 0,
+            stream: true,
+            include_usage: false,
+            thinking_enabled: false,
+            reasoning_level: params.reasoning_level,
+            response_status: res.status,
+            response_time_ms: responseTimeMs,
+            error_message: errorMessage,
+          });
+        }
+
+        return;
+      }
+
+      // Check if non-stream (JSON) response for v1 endpoints
+      const isV1Endpoint = params.endpoint.startsWith('/v1/');
+      const isNonStream = isV1Endpoint && !params.stream;
+
+      if (isNonStream) {
+        // Non-stream: response is plain JSON
+        const json = await res.json();
+        accumulatedContent = json.content || '';
+        conversationId = json.conversation_id || null;
+
+        setResult({
+          content: accumulatedContent,
+          rawJson: JSON.stringify(json, null, 2),
+          promptTokens,
+          completionTokens,
+          totalTokens,
+          responseTimeMs: Date.now() - startTime,
+          status: 200,
+          memoryInfo,
+          conversationId,
+        });
+      } else {
+        // SSE stream
+        const reader = res.body?.getReader();
+        if (!reader) {
+          throw new Error('No response stream');
+        }
+
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            const data = line.slice(6).trim();
+
+            if (data === '[DONE]') continue;
+
+            try {
+              const parsed = JSON.parse(data);
+
+              if (parsed.conversation_id) {
+                conversationId = parsed.conversation_id;
+              }
+
+              if (parsed.memory_info) {
+                memoryInfo = parsed.memory_info;
+              }
+
+              if (parsed.content) {
+                accumulatedContent += parsed.content;
+                setResult({
+                  content: accumulatedContent,
+                  rawJson: '',
+                  promptTokens,
+                  completionTokens,
+                  totalTokens,
+                  responseTimeMs: Date.now() - startTime,
+                  status: 200,
+                  memoryInfo,
+                  conversationId,
+                });
+              }
+
+              if (parsed.error) {
+                setResult({
+                  content: accumulatedContent,
+                  rawJson: '',
+                  responseTimeMs: Date.now() - startTime,
+                  status: 200,
+                  error: parsed.error,
+                  memoryInfo,
+                  conversationId,
+                });
+              }
+            } catch {
+              // Skip malformed JSON
+            }
+          }
+        }
+
+        // Final result
+        setResult({
+          content: accumulatedContent,
+          rawJson: JSON.stringify({
+            conversation_id: conversationId,
+            content: accumulatedContent,
+            memory_info: memoryInfo,
+          }, null, 2),
+          promptTokens,
+          completionTokens,
+          totalTokens,
+          responseTimeMs: Date.now() - startTime,
+          status: 200,
+          memoryInfo,
+          conversationId,
+        });
+      }
+
+      // Save to history (requires auth)
+      if (currentUser) {
         await api.createDebugHistory({
           model: params.model,
           messages: JSON.stringify([{ role: 'user', content: params.message }]),
@@ -224,120 +361,16 @@ export default function APIExplorerPage() {
           include_usage: false,
           thinking_enabled: false,
           reasoning_level: params.reasoning_level,
-          response_status: res.status,
+          response_status: 200,
           response_time_ms: responseTimeMs,
-          error_message: errorMessage,
+          prompt_tokens: promptTokens,
+          completion_tokens: completionTokens,
+          total_tokens: totalTokens,
         });
 
-        return;
+        const newHistory = await api.fetchDebugHistory(50, 0);
+        setHistory(newHistory);
       }
-
-      // Handle SSE stream
-      const reader = res.body?.getReader();
-      if (!reader) {
-        throw new Error('No response stream');
-      }
-
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          const data = line.slice(6).trim();
-
-          if (data === '[DONE]') continue;
-
-          try {
-            const parsed = JSON.parse(data);
-
-            // Handle conversation_id
-            if (parsed.conversation_id) {
-              conversationId = parsed.conversation_id;
-            }
-
-            // Handle memory_info (for /api/v1/chat)
-            if (parsed.memory_info) {
-              memoryInfo = parsed.memory_info;
-            }
-
-            // Handle content
-            if (parsed.content) {
-              accumulatedContent += parsed.content;
-              setResult({
-                content: accumulatedContent,
-                rawJson: '',
-                promptTokens,
-                completionTokens,
-                totalTokens,
-                responseTimeMs: Date.now() - startTime,
-                status: 200,
-                memoryInfo,
-                conversationId,
-              });
-            }
-
-            // Handle error
-            if (parsed.error) {
-              setResult({
-                content: accumulatedContent,
-                rawJson: '',
-                responseTimeMs: Date.now() - startTime,
-                status: 200,
-                error: parsed.error,
-                memoryInfo,
-                conversationId,
-              });
-            }
-          } catch {
-            // Skip malformed JSON
-          }
-        }
-      }
-
-      // Final result
-      setResult({
-        content: accumulatedContent,
-        rawJson: JSON.stringify({
-          conversation_id: conversationId,
-          content: accumulatedContent,
-          memory_info: memoryInfo,
-        }, null, 2),
-        promptTokens,
-        completionTokens,
-        totalTokens,
-        responseTimeMs: Date.now() - startTime,
-        status: 200,
-        memoryInfo,
-        conversationId,
-      });
-
-      // Save to history
-      await api.createDebugHistory({
-        model: params.model,
-        messages: JSON.stringify([{ role: 'user', content: params.message }]),
-        max_tokens: 0,
-        stream: true,
-        include_usage: false,
-        thinking_enabled: false,
-        reasoning_level: params.reasoning_level,
-        response_status: 200,
-        response_time_ms: responseTimeMs,
-        prompt_tokens: promptTokens,
-        completion_tokens: completionTokens,
-        total_tokens: totalTokens,
-      });
-
-      // Refresh history
-      const newHistory = await api.fetchDebugHistory(50, 0);
-      setHistory(newHistory);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : '未知错误';
       setResult({
@@ -379,6 +412,7 @@ export default function APIExplorerPage() {
           memory_scope: 'all',
           include_memory_info: false,
         },
+        stream: true,
       });
       setActiveTab('result');
     } catch {
@@ -414,21 +448,7 @@ export default function APIExplorerPage() {
     );
   }
 
-  if (!currentUser) {
-    return (
-      <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <Result
-          status="warning"
-          title="请先登录以使用 API Explorer"
-          extra={
-            <Link to="/">
-              <Button type="primary">返回主页</Button>
-            </Link>
-          }
-        />
-      </div>
-    );
-  }
+  // Allow unauthenticated access - skip login gate
 
   return (
     <Layout style={{ height: '100vh', background: '#f5f5f5' }}>
@@ -446,7 +466,7 @@ export default function APIExplorerPage() {
           <Button icon={<ArrowLeftOutlined />} type="text">返回</Button>
         </Link>
         <Typography.Title level={4} style={{ margin: 0 }}>Chat API Explorer</Typography.Title>
-        <Typography.Text type="secondary">{currentUser.email}</Typography.Text>
+        <Typography.Text type="secondary">{currentUser?.email ?? '未登录'}</Typography.Text>
       </Layout.Header>
 
       {/* Body */}

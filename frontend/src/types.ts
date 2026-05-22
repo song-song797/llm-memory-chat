@@ -225,4 +225,5 @@ export interface ChatApiParams {
   reasoning_level: ReasoningLevel;
   mode: 'fast' | 'think' | null;
   memory: MemoryInjectionConfig;
+  stream: boolean;
 }

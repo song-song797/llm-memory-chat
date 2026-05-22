@@ -105,7 +105,12 @@ export default function ParamsPanel({ params, modelOptions, onChange }: ParamsPa
     });
   };
 
+  const handleStreamChange = (checked: boolean) => {
+    onChange({ ...params, stream: checked });
+  };
+
   const isSimpleEndpoint = params.endpoint === '/v1/chat/simple';
+  const isV1Endpoint = params.endpoint.startsWith('/v1/');
   const isV1ChatEndpoint = params.endpoint === '/v1/chat';
 
   const collapseItems = [
@@ -233,6 +238,17 @@ export default function ParamsPanel({ params, modelOptions, onChange }: ParamsPa
       ),
       style: panelStyle,
     },
+    ...(isV1Endpoint ? [{
+      key: 'stream',
+      label: 'stream',
+      children: (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <Typography.Text>流式响应 (stream)</Typography.Text>
+          <Switch checked={params.stream} onChange={handleStreamChange} />
+        </div>
+      ),
+      style: panelStyle,
+    }] : []),
     ...(isV1ChatEndpoint ? [{
       key: 'memory',
       label: 'memory 配置',

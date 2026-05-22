@@ -121,6 +121,21 @@ for line in response.iter_lines():
     const apiBase = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000/api';
     const payload = buildPayload();
     const payloadJson = JSON.stringify(payload, null, 2);
+    const isStream = params.endpoint.startsWith('/v1/') ? params.stream : true;
+
+    if (!isStream) {
+      return `const response = await fetch('${apiBase}${params.endpoint}', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'Authorization': 'Bearer YOUR_TOKEN'
+  },
+  body: JSON.stringify(${payloadJson})
+});
+
+const result = await response.json();
+console.log(result.content);`;
+    }
 
     return `const response = await fetch('${apiBase}${params.endpoint}', {
   method: 'POST',
@@ -139,7 +154,7 @@ while (true) {
   if (done) break;
 
   const chunk = decoder.decode(value);
-  const lines = chunk.split('\\n');
+  const lines = chunk.split('\n');
 
   for (const line of lines) {
     if (line.startsWith('data: ')) {
