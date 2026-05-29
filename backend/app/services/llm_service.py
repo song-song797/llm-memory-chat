@@ -99,18 +99,13 @@ def _build_model_controls(
         }
         return extra_body, model_max
 
+    if reasoning_mode == "always_budget":
+        return extra_body, model_max
+
     budget = REASONING_BUDGETS["deep" if reasoning_level == "deep" else "standard"]
 
-    if model in {"qwen3.5-plus", "qwen3.6-plus"}:
-        if reasoning_level == "off":
-            extra_body["enable_thinking"] = False
-            return extra_body, model_max
-
-        extra_body["enable_thinking"] = True
-        extra_body["thinking_budget"] = budget
-        return extra_body, max(model_max, budget)
-
-    if model == "glm-5":
+    # GLM models
+    if model.startswith("zai/glm"):
         if reasoning_level == "off":
             extra_body["thinking"] = {"type": "disabled"}
             return extra_body, model_max
@@ -121,9 +116,28 @@ def _build_model_controls(
         }
         return extra_body, max(model_max, budget)
 
-    if model == "MiniMax-M2.5":
-        extra_body["reasoning_split"] = True
-        extra_body["thinking_budget"] = budget
+    # DeepSeek models
+    if model.startswith("deepseek"):
+        if reasoning_level == "off":
+            extra_body["thinking"] = {"type": "disabled"}
+            return extra_body, model_max
+
+        extra_body["thinking"] = {
+            "type": "enabled",
+            "budget_tokens": budget,
+        }
+        return extra_body, max(model_max, budget)
+
+    # MIMO models
+    if model.startswith("mimo"):
+        if reasoning_level == "off":
+            extra_body["thinking"] = {"type": "disabled"}
+            return extra_body, model_max
+
+        extra_body["thinking"] = {
+            "type": "enabled",
+            "budget_tokens": budget,
+        }
         return extra_body, max(model_max, budget)
 
     return extra_body, model_max
